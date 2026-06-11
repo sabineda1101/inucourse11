@@ -2,9 +2,11 @@ import type { Metadata } from "next";
 import { Montserrat } from "next/font/google";
 import "./globals.css";
 import Sidebar from "./components/Sidebar";
+import Breadcrumb from "./components/Breadcrumb";
 import { AuthProvider } from "./context/AuthContext";
 import { CartProvider } from "./context/CartContext";
 import { OrderProvider } from "./context/OrderContext";
+import { Suspense } from "react";
 
 const montserrat = Montserrat({
   variable: "--font-montserrat",
@@ -26,21 +28,28 @@ export default function RootLayout({
       lang="en"
       className={`${montserrat.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex text-[#111] relative overflow-hidden bg-gradient-to-br from-[#f0f4ff] via-[#fafafa] to-[#fff0f5]">
-        {/* Grain Texture */}
-        <div className="fixed inset-0 pointer-events-none z-[100] opacity-[0.03]" style={{ backgroundImage: "url(\"data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E\")" }}></div>
-        
-        <AuthProvider>
-          <CartProvider>
-            <OrderProvider>
-              <Sidebar />
-              <main className="flex-1 p-8 h-screen overflow-y-auto relative z-10">
-                {children}
-              </main>
-            </OrderProvider>
-          </CartProvider>
-        </AuthProvider>
-      </body>
-    </html>
+      <body className="min-h-screen flex flex-col text-[#111] relative overflow-hidden bg-gradient-to-br from-[#f0f4ff] via-[#fafafa] to-[#fff0f5]">
+  {/* Grain Texture */}
+  <div className="fixed inset-0 pointer-events-none z-[100] opacity-[0.03]" style={{ backgroundImage: "url(\"data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E\")"}}></div>
+  <AuthProvider>
+    <CartProvider>
+      <OrderProvider>
+        <div className="flex flex-1">
+          <Suspense fallback={<div className="w-[280px] h-[calc(100vh-32px)] bg-white m-4 rounded-2xl animate-pulse shrink-0 border border-gray-100" />}>
+            <Sidebar />
+          </Suspense>
+          <main className="flex-1 p-8 h-screen overflow-y-auto relative z-10">
+            {children}
+          </main>
+        </div>
+      </OrderProvider>
+    </CartProvider>
+  </AuthProvider>
+  <footer className="bg-gray-800 text-white py-4 px-6 mt-auto w-full">
+    <Breadcrumb />
+  </footer>
+</body>
+
+        </html>
   );
 }

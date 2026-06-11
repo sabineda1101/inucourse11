@@ -10,6 +10,7 @@ import { Trash2, BookOpen, ChevronLeft, Calendar, CreditCard, X, Loader2, Check,
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Course } from "../context/CartContext";
+import { loadTossPayments } from "@tosspayments/tosspayments-sdk";
 
 export default function CartPage() {
   const { cart, removeFromCart, clearCart } = useCart();
@@ -20,8 +21,23 @@ export default function CartPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
+  const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
+  const [customerName, setCustomerName] = useState("");
+  const [customerEmail, setCustomerEmail] = useState("");
+  const [validationErrors, setValidationErrors] = useState<{
+    name?: string;
+    email?: string;
+  }>({});
+
   const totalCredits = cart.reduce((sum, item) => sum + item.credits, 0);
   const totalPrice = cart.reduce((sum, item) => sum + item.price, 0);
+
+  useEffect(() => {
+    if (user) {
+      setCustomerName((prev) => prev || user.name || "");
+      setCustomerEmail((prev) => prev || user.email || "");
+    }
+  }, [user]);
 
   useEffect(() => {
     if (toastMessage) {
@@ -32,52 +48,121 @@ export default function CartPage() {
     }
   }, [toastMessage]);
 
+  const handleStartPayment = (e: React.FormEvent) => {
+    e.preventDefault();
+    const errors: { name?: string; email?: string } = {};
+
+    if (!customerName.trim()) {
+      errors.name = "이름을 입력해 주세요.";
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!customerEmail.trim()) {
+      errors.email = "이메일을 입력해 주세요.";
+    } else if (!emailRegex.test(customerEmail)) {
+      errors.email = "올바른 이메일 형식이 아닙니다.";
+    }
+
+    if (Object.keys(errors).length > 0) {
+      setValidationErrors(errors);
+      return;
+    }
+
+    setValidationErrors({});
+    setIsPaymentModalOpen(false);
+    handleCheckout();
+  };
+
   const handleCheckout = async () => {
     if (cart.length === 0 || !user || isSubmitting) return;
 
     setIsSubmitting(true);
 
-    // If Supabase is not reachable, fall back to mock mode immediately
-    if (!isSupabase) {
-      addOrder(cart);
-      clearCart();
-      setToastMessage("수강 신청이 완료되었습니다!");
+    const clientKey = process.env.NEXT_PUBLIC_TOSS_CLIENT_KEY;
+    if (!clientKey) {
+      setToastMessage("NEXT_PUBLIC_TOSS_CLIENT_KEY가 설정되지 않았습니다.");
       setIsSubmitting(false);
-      setTimeout(() => router.push("/orders"), 1500);
       return;
     }
 
+    const orderName = cart.length === 1 ? cart[0].name : `${cart[0].name} 외 ${cart.length - 1}건`;
+
+    // Helper function for mock checkout fallback
+    const runMockCheckout = async (fallbackCustomerKey: string) => {
+      try {
+        const orderId = `mock_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+        const tossPayments = await loadTossPayments(clientKey);
+        const payment = tossPayments.payment({ customerKey: fallbackCustomerKey });
+
+        await payment.requestPayment({
+          method: "CARD",
+          amount: {
+            currency: "KRW",
+            value: totalPrice,
+          },
+          orderId,
+          orderName,
+          successUrl: `${window.location.origin}/payment/success`,
+          failUrl: `${window.location.origin}/payment/fail`,
+          customerEmail: customerEmail || undefined,
+          customerName: customerName || undefined,
+        });
+      } catch (error: any) {
+        console.error("Mock Toss payment fallback error:", error);
+        setToastMessage(error.message || "결제창 실행에 실패했습니다.");
+        setIsSubmitting(false);
+      }
+    };
+
+    // 1. Mock Mode (Supabase not configured or reachable)
+    if (!isSupabase) {
+      await runMockCheckout("ANONYMOUS");
+      return;
+    }
+
+    // 2. Database Mode (Supabase active)
     const supabase = getSupabase();
     if (!supabase) {
-      // getSupabase returned null despite isSupabase being true — edge case fallback
-      addOrder(cart);
-      clearCart();
-      setToastMessage("수강 신청이 완료되었습니다!");
-      setIsSubmitting(false);
-      setTimeout(() => router.push("/orders"), 1500);
+      await runMockCheckout("ANONYMOUS");
       return;
     }
 
     try {
-      // 1. Create order
+      // Create order with payment_pending status
       const { data: orderData, error: orderError } = await supabase
         .from("orders")
         .insert({
           user_id: user.id,
           total_price: totalPrice,
           total_credits: totalCredits,
-          status: 'completed'
+          status: 'payment_pending'
         })
         .select('id')
         .single();
 
       if (orderError || !orderData) {
+        // Check if the error is due to missing orders table
+        const isTableMissing = 
+          orderError?.message?.includes("schema cache") || 
+          orderError?.message?.includes("does not exist") ||
+          orderError?.code === "PGRST116" ||
+          orderError?.code === "42P01"; // Undefined table code in PostgreSQL
+
+        if (isTableMissing) {
+          console.warn("Supabase 'orders' table is missing. Falling back to Mock Order mode for testing.", orderError);
+          setToastMessage("안내: 데이터베이스에 orders 테이블이 없어 임시 Mock 결제로 진행합니다. (원복을 위해 migration.sql을 실행하세요.)");
+          setTimeout(() => {
+            runMockCheckout(user.id);
+          }, 1500);
+          return;
+        }
+
         throw new Error(orderError?.message || "Order creation failed");
       }
 
       const orderId = orderData.id;
 
-      // 2. Create order items
+      // Create order items
       const orderItems = cart.map(item => ({
         order_id: orderId,
         course_id: item.id,
@@ -94,25 +179,50 @@ export default function CartPage() {
         .from("order_items")
         .insert(orderItems);
 
-      // 3. Rollback if items fail
       if (itemsError) {
+        // Rollback created order if inserting items fails
         await supabase.from("orders").delete().eq('id', orderId);
+        
+        // Also check if order_items table is missing
+        const isItemsTableMissing = 
+          itemsError.message?.includes("schema cache") || 
+          itemsError.message?.includes("does not exist") ||
+          itemsError.code === "PGRST116" ||
+          itemsError.code === "42P01";
+
+        if (isItemsTableMissing) {
+          console.warn("Supabase 'order_items' table is missing. Falling back to Mock Order mode.", itemsError);
+          setToastMessage("안내: 데이터베이스에 order_items 테이블이 없어 임시 Mock 결제로 진행합니다.");
+          setTimeout(() => {
+            runMockCheckout(user.id);
+          }, 1500);
+          return;
+        }
+
         throw new Error(itemsError.message);
       }
 
-      // Success
-      addOrder(cart); // Update local context if needed
-      clearCart();
-      setToastMessage("수강 신청이 완료되었습니다!");
-      
-      setTimeout(() => {
-        router.push("/orders");
-      }, 1500);
-      
-    } catch (error) {
+      // Initialize and trigger Toss Payments
+      const tossPayments = await loadTossPayments(clientKey);
+      const payment = tossPayments.payment({ customerKey: user.id });
+
+      await payment.requestPayment({
+        method: "CARD",
+        amount: {
+          currency: "KRW",
+          value: totalPrice,
+        },
+        orderId,
+        orderName,
+        successUrl: `${window.location.origin}/payment/success`,
+        failUrl: `${window.location.origin}/payment/fail`,
+        customerEmail: customerEmail || undefined,
+        customerName: customerName || undefined,
+      });
+
+    } catch (error: any) {
       console.error("Checkout error:", error);
-      setToastMessage("수강 신청에 실패했습니다. 다시 시도해 주세요.");
-    } finally {
+      setToastMessage(error.message || "수강 신청에 실패했습니다. 다시 시도해 주세요.");
       setIsSubmitting(false);
     }
   };
@@ -242,7 +352,10 @@ export default function CartPage() {
               </div>
 
               <button
-                onClick={handleCheckout}
+                onClick={() => {
+                  if (cart.length === 0 || !user || isSubmitting) return;
+                  setIsPaymentModalOpen(true);
+                }}
                 disabled={isSubmitting || cart.length === 0 || !user}
                 className="w-full py-4 bg-[#111] hover:bg-[#333] disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.98] text-white rounded-2xl text-sm font-extrabold shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-2 cursor-pointer"
               >
@@ -320,6 +433,119 @@ export default function CartPage() {
                 장바구니에서 제거
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Payment Client Info Input Modal */}
+      {isPaymentModalOpen && (
+        <div 
+          className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm transition-all duration-300 animate-fade-in"
+          onClick={() => setIsPaymentModalOpen(false)}
+        >
+          <div 
+            className="bg-white/90 backdrop-blur-xl border border-white/50 rounded-3xl p-8 max-w-md w-full shadow-2xl transform scale-100 transition-all duration-300 relative"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Close Button */}
+            <button 
+              onClick={() => setIsPaymentModalOpen(false)} 
+              className="absolute top-6 right-6 p-2 bg-gray-100 hover:bg-gray-200 rounded-full transition-colors cursor-pointer"
+            >
+              <X size={18} className="text-[#666]" />
+            </button>
+
+            {/* Header */}
+            <div className="space-y-1.5 mb-6">
+              <span className="text-xs font-bold text-blue-600 tracking-wider uppercase">Order Checkout</span>
+              <h2 className="text-2xl font-black text-[#111] tracking-tight">결제자 정보 입력</h2>
+              <p className="text-xs text-gray-500 leading-normal">
+                안전한 결제 진행을 위해 신청자 정보를 확인하고 입력해 주세요.
+              </p>
+            </div>
+
+            {/* Form */}
+            <form onSubmit={handleStartPayment} className="space-y-5">
+              {/* Name field */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-[#333] flex items-center gap-1">
+                  이름 <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={customerName}
+                  onChange={(e) => {
+                    setCustomerName(e.target.value);
+                    if (validationErrors.name) {
+                      setValidationErrors((prev) => ({ ...prev, name: undefined }));
+                    }
+                  }}
+                  placeholder="실명을 입력해 주세요"
+                  className={`w-full px-4 py-3 bg-white/60 border ${
+                    validationErrors.name ? "border-red-400 focus:border-red-500 focus:ring-red-100" : "border-gray-200 focus:border-blue-500 focus:ring-blue-100"
+                  } rounded-xl text-sm font-semibold placeholder-gray-400 outline-none transition-all focus:ring-4`}
+                />
+                {validationErrors.name && (
+                  <p className="text-[11px] text-red-500 font-semibold mt-1">{validationErrors.name}</p>
+                )}
+              </div>
+
+              {/* Email field */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-[#333] flex items-center gap-1">
+                  이메일 주소 <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="email"
+                  value={customerEmail}
+                  onChange={(e) => {
+                    setCustomerEmail(e.target.value);
+                    if (validationErrors.email) {
+                      setValidationErrors((prev) => ({ ...prev, email: undefined }));
+                    }
+                  }}
+                  placeholder="example@email.com"
+                  className={`w-full px-4 py-3 bg-white/60 border ${
+                    validationErrors.email ? "border-red-400 focus:border-red-500 focus:ring-red-100" : "border-gray-200 focus:border-blue-500 focus:ring-blue-100"
+                  } rounded-xl text-sm font-semibold placeholder-gray-400 outline-none transition-all focus:ring-4`}
+                />
+                {validationErrors.email && (
+                  <p className="text-[11px] text-red-500 font-semibold mt-1">{validationErrors.email}</p>
+                )}
+              </div>
+
+
+
+              {/* Info summary */}
+              <div className="bg-gray-50 border border-gray-100 rounded-2xl p-4 space-y-2 mt-2">
+                <div className="flex justify-between items-center text-xs">
+                  <span className="text-gray-500 font-medium">총 결제 금액</span>
+                  <span className="text-sm font-extrabold text-[#111]">{totalPrice.toLocaleString()}원</span>
+                </div>
+                <div className="flex justify-between items-center text-xs">
+                  <span className="text-gray-500 font-medium">총 신청 학점</span>
+                  <span className="text-xs font-bold text-blue-600">{totalCredits}학점 ({cart.length}개 교과목)</span>
+                </div>
+              </div>
+
+              {/* Actions */}
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setIsPaymentModalOpen(false)}
+                  className="flex-1 py-3 bg-gray-100 hover:bg-gray-200 text-[#333] rounded-xl text-xs font-bold transition-all active:scale-[0.98] cursor-pointer"
+                >
+                  취소
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 py-3 bg-[#111] hover:bg-[#333] text-white rounded-xl text-xs font-bold transition-all shadow-md active:scale-[0.98] flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <CreditCard size={14} />
+                  결제하기
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
