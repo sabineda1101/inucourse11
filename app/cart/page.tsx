@@ -10,7 +10,7 @@ import { Trash2, BookOpen, ChevronLeft, Calendar, CreditCard, X, Loader2, Check,
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Course } from "../context/CartContext";
-import { loadTossPayments } from "@tosspayments/tosspayments-sdk";
+import { loadTossPayments, ANONYMOUS } from "@tosspayments/tosspayments-sdk";
 
 export default function CartPage() {
   const { cart, removeFromCart, clearCart } = useCart();
@@ -88,7 +88,7 @@ export default function CartPage() {
     const orderName = cart.length === 1 ? cart[0].name : `${cart[0].name} 외 ${cart.length - 1}건`;
 
     // Helper function for mock checkout fallback
-    const runMockCheckout = async (fallbackCustomerKey: string) => {
+    const runMockCheckout = async (fallbackCustomerKey: string | typeof ANONYMOUS) => {
       try {
         const orderId = `mock_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
         const tossPayments = await loadTossPayments(clientKey);
@@ -116,14 +116,14 @@ export default function CartPage() {
 
     // 1. Mock Mode (Supabase not configured or reachable)
     if (!isSupabase) {
-      await runMockCheckout("ANONYMOUS");
+      await runMockCheckout(ANONYMOUS);
       return;
     }
 
     // 2. Database Mode (Supabase active)
     const supabase = getSupabase();
     if (!supabase) {
-      await runMockCheckout("ANONYMOUS");
+      await runMockCheckout(ANONYMOUS);
       return;
     }
 
