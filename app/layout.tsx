@@ -34,26 +34,24 @@ export default function RootLayout({
       lang="en"
       className={`${montserrat.variable} h-full antialiased`}
     >
-      <body className="min-h-screen flex flex-col text-[#111] relative overflow-hidden bg-gradient-to-br from-[#f0f4ff] via-[#fafafa] to-[#fff0f5]">
+      <body className="min-h-screen flex flex-col text-[#111] relative bg-gradient-to-br from-[#f0f4ff] via-[#fafafa] to-[#fff0f5]">
   {/* Grain Texture */}
   <div className="fixed inset-0 pointer-events-none z-[100] opacity-[0.03]" style={{ backgroundImage: "url(\"data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E\")"}}></div>
 <ThemeProvider>
         <AuthProvider>
           <CartProvider>
             <OrderProvider>
-              <div className="flex-1 flex flex-col h-screen overflow-hidden">
-                <div className="flex flex-1 h-full overflow-hidden">
-                  <Suspense fallback={<div className="w-[280px] h-[calc(100vh-32px)] bg-white m-4 rounded-2xl animate-pulse shrink-0 border border-gray-100" />}>
-                    <Sidebar />
-                  </Suspense>
-                  <div className="flex-1 flex flex-col h-full overflow-hidden">
-                    <main className="flex-1 p-8 overflow-y-auto relative z-10">
-                      {children}
-                    </main>
-                    <footer className="bg-gray-800 text-white py-4 px-6 w-full z-20 shrink-0">
-                      <Breadcrumb />
-                    </footer>
-                  </div>
+              <div className="flex-1 flex min-h-screen">
+                <Suspense fallback={<div className="w-[280px] h-[calc(100vh-32px)] bg-white m-4 rounded-2xl animate-pulse shrink-0 border border-gray-100" />}>
+                  <Sidebar />
+                </Suspense>
+                <div className="flex-1 flex flex-col min-h-screen">
+                  <main className="flex-1 p-8 relative z-10">
+                    {children}
+                  </main>
+                  <footer className="bg-gray-800 text-white py-4 px-6 w-full z-20 shrink-0">
+                    <Breadcrumb />
+                  </footer>
                 </div>
               </div>
             </OrderProvider>

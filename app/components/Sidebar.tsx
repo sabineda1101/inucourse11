@@ -41,7 +41,7 @@ export default function Sidebar() {
   const isDashboardActive = pathname === "/dashboard";
 
   return (
-    <aside className="w-[280px] h-[calc(100vh-32px)] bg-white/95 text-gray-700 rounded-2xl flex flex-col m-4 overflow-hidden shadow-lg border border-gray-200/80 shrink-0">
+    <aside className="w-[280px] h-[calc(100vh-32px)] bg-white/95 text-gray-700 rounded-2xl flex flex-col m-4 overflow-hidden shadow-lg border border-gray-200/80 shrink-0 sticky top-4">
       {/* Header matching screenshot */}
       <div className="px-6 py-6 border-b border-gray-100 flex flex-col">
         <span className="font-bold text-gray-900 text-[18px] tracking-tight leading-tight">
