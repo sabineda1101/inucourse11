@@ -41,18 +41,20 @@ export default function RootLayout({
         <AuthProvider>
           <CartProvider>
             <OrderProvider>
-              <div className="flex-1 flex flex-col">
-                <div className="flex flex-1">
+              <div className="flex-1 flex flex-col h-screen overflow-hidden">
+                <div className="flex flex-1 h-full overflow-hidden">
                   <Suspense fallback={<div className="w-[280px] h-[calc(100vh-32px)] bg-white m-4 rounded-2xl animate-pulse shrink-0 border border-gray-100" />}>
                     <Sidebar />
                   </Suspense>
-                  <main className="flex-1 p-8 h-screen overflow-y-auto relative z-10">
-                    {children}
-                  </main>
+                  <div className="flex-1 flex flex-col h-full overflow-hidden">
+                    <main className="flex-1 p-8 overflow-y-auto relative z-10">
+                      {children}
+                    </main>
+                    <footer className="bg-gray-800 text-white py-4 px-6 w-full z-20 shrink-0">
+                      <Breadcrumb />
+                    </footer>
+                  </div>
                 </div>
-                <footer className="bg-gray-800 text-white py-4 px-6 mt-auto w-full z-20">
-                  <Breadcrumb />
-                </footer>
               </div>
             </OrderProvider>
           </CartProvider>
